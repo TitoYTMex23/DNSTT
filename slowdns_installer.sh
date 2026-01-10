@@ -75,7 +75,8 @@ install_dnstt_server() {
     echo -e "$VERDE Arquitectura detectada: $ARCH ($ARCH_NAME)$FIN"
 
     echo -e "$CYAN Obteniendo la última versión de dnstt-server...$FIN"
-    LATEST_TAG=$(curl -s "https://api.github.com/repos/d3-pub/dnstt/releases/latest" | grep -Po '"tag_name": "\K.*?(?=")')
+    # Usamos -L para seguir redirecciones y -s para modo silencioso en la consulta a la API
+    LATEST_TAG=$(curl -sL "https://api.github.com/repos/d3-pub/dnstt/releases/latest" | grep -Po '"tag_name": "\K.*?(?=")')
     if [ -z "$LATEST_TAG" ]; then
         echo -e "$ROJO No se pudo obtener la última versión de dnstt. Usando v1.1.2 como fallback.$FIN"
         LATEST_TAG="v1.1.2" # Fallback version
@@ -85,10 +86,21 @@ install_dnstt_server() {
     DOWNLOAD_URL="https://github.com/d3-pub/dnstt/releases/download/${LATEST_TAG}/dnstt-server-linux-${ARCH_NAME}"
 
     echo -e "$CYAN Descargando dnstt-server desde $DOWNLOAD_URL...$FIN"
-    curl -L -o /usr/local/bin/dnstt-server "$DOWNLOAD_URL"
+    # Usamos -f para que curl falle si hay un error HTTP (ej. 404)
+    curl -Lfo /usr/local/bin/dnstt-server "$DOWNLOAD_URL"
 
     if [ $? -ne 0 ]; then
-        echo -e "$ROJO La descarga de dnstt-server falló.$FIN"
+        echo -e "$ROJO La descarga de dnstt-server falló. Comprueba la URL y tu conexión a internet.$FIN"
+        rm -f /usr/local/bin/dnstt-server # Limpiar descarga parcial
+        exit 1
+    fi
+
+    # Verificar que el archivo descargado es un ejecutable
+    if ! file /usr/local/bin/dnstt-server | grep -q "executable"; then
+        echo -e "$ROJO El archivo descargado no parece ser un ejecutable válido.$FIN"
+        echo -e "$AMARILLO Contenido del archivo descargado:$FIN"
+        cat /usr/local/bin/dnstt-server
+        rm -f /usr/local/bin/dnstt-server # Limpiar archivo inválido
         exit 1
     fi
 
@@ -110,6 +122,11 @@ configure_dnstt() {
     if [ ! -f /etc/slowdns/server.key ] || [ ! -f /etc/slowdns/server.pub ]; then
         echo -e "$AMARILLO Generando claves para el servidor DNS...$FIN"
         /usr/local/bin/dnstt-server -gen-key -privkey-file /etc/slowdns/server.key -pubkey-file /etc/slowdns/server.pub
+        if [ $? -ne 0 ] || [ ! -f /etc/slowdns/server.key ] || [ ! -f /etc/slowdns/server.pub ]; then
+            echo -e "$ROJO La generación de claves para dnstt-server falló.$FIN"
+            exit 1
+        fi
+        echo -e "$VERDE Claves generadas con éxito.$FIN"
     else
         echo -e "$VERDE Las claves del servidor DNS ya existen.$FIN"
     fi
